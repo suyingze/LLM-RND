@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+
+# Logs / runtime outputs
+RND/output/
+analysis_log.jsonl
+result.json
+
+# Environment
+.env
+.venv/
+
+# VSCode (¿ÉÑ¡)
+.vscode/
+
+# Dataset
+RND/dataset/
+
+# Images
+images/
+
+#Logs
+logs/
+
+# Reference files
+references
+
+# config files
+RND/config.py
