@@ -20,7 +20,7 @@ def get_token_count(text):
 class DisambiguationSignature(dspy.Signature):
     """姓名消歧判定：根据论文信息匹配候选人 ID 或返回 new_author。"""
     paper_info = dspy.InputField(desc="待处理论文的标题、机构等")
-    candidate_profiles = dspy.InputField(desc="候选人背景画像池")
+    candidate_profiles = dspy.InputField(desc="候选人背景画像池，注意：候选人画像中括号内的数字代表该特征出现的频次。频次越高，代表该特征（如合作者或研究主题）对该候选人的代表性越强。")
     best_id = dspy.OutputField(desc="匹配成功的 ID 或 'new_author'")
     reasoning = dspy.OutputField(desc="判定依据（简要）")
 

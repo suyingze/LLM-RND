@@ -51,12 +51,12 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db):
         # 3. 组织成自然语言描述
         desc = f"【候选人 ID: {auth_id}】\n"
         org_list = sorted(all_orgs)
-        desc += f"- 历史就职机构: {'; '.join(org_list[:5]) if org_list else '未知'}\n"
-        top_keywords = [kw for kw, _ in keywords_pool.most_common(8)]
-        desc += f"- 核心研究主题: {', '.join(top_keywords)}\n"
-        desc += f"- 代表性论文标题: {'; '.join(titles[:3])} 等\n"
-        top_collaborators = [name for name, _ in all_collaborators.most_common(10)]
-        desc += f"- 主要合作者: {', '.join(top_collaborators)}\n"
+        desc += f"- 机构: {'; '.join(org_list[:5]) if org_list else '未知'}\n"
+        top_keywords = [f"{kw}({count}次)" for kw, count in keywords_pool.most_common(8)]
+        desc += f"- 关键词（频次）: {', '.join(top_keywords)}\n"
+        desc += f"- 论文标题: {'; '.join(titles[:3])} 等\n"
+        top_collaborators = [f"{name}({count}次)" for name, count in all_collaborators.most_common(10)]
+        desc += f"- 合作者（频次）: {', '.join(top_collaborators)}\n"
 
         
 
@@ -110,7 +110,6 @@ def same_name(a: str, b: str) -> bool:
         if len(pb[0]) == 1 and pa[1] == pb[1] and pa[0].startswith(pb[0]):
             return True
     return False
-    return profiles_text
     
     # 情况 3: 多段名，首尾互换
 
