@@ -1,18 +1,18 @@
-main.py
-´ÓwholeÂÛÎÄ¿âÀïÄÃµ½ÂÛÎÄĞÅÏ¢ ¡ú ¶¨Î»ÕâÆªÂÛÎÄÀïµÚ index ¸ö×÷Õß ¡ú ÔÚ×÷Õß¼òÀú¿âÀïÑ¡³ö×î¿ÉÄÜµÄ×÷ÕßID ¡ú °Ñ´ğ°¸Ğ´Èë output/result.json
-cna_valid_unass.json£º´ıÏûÆçÌâÄ¿ÁĞ±í£¨ĞÎÈç paperID-index£©
-
-cna_valid_unass_pub.json£ºÂÛÎÄ¿â£¨paperID ¡ú ÂÛÎÄÏêÏ¸ĞÅÏ¢£©
-
-whole_author_profiles.json£º×÷Õß¼òÀú¿â£¨authorID ¡ú ×÷Õßprofile£©
-
-output/result.json£ºÄãÒªÌá½»/ÆÀ²âµÄÔ¤²âÊä³ö
-
-# 1. ´´½¨ĞÂ»·¾³ (½¨Òé Python 3.9 »òÒÔÉÏ)
+# 1. åˆ›å»ºæ–°ç¯å¢ƒ (å»ºè®® Python 3.9 æˆ–ä»¥ä¸Š)
 conda create -n rnd_dspy python=3.10
 
-# 2. ¼¤»î»·¾³
+# 2. æ¿€æ´»ç¯å¢ƒ
 conda activate rnd_dspy
 
-# 3. °²×°ºËĞÄÒÀÀµ
+# 3. å®‰è£…æ ¸å¿ƒä¾èµ–
 pip install dspy-ai openai tqdm  transformers
+
+main.py
+ä»wholeè®ºæ–‡åº“é‡Œæ‹¿åˆ°è®ºæ–‡ä¿¡æ¯ â†’ å®šä½è¿™ç¯‡è®ºæ–‡é‡Œç¬¬ index ä¸ªä½œè€… â†’ åœ¨ä½œè€…ç®€å†åº“é‡Œé€‰å‡ºæœ€å¯èƒ½çš„ä½œè€…ID â†’ æŠŠç­”æ¡ˆå†™å…¥ output/result.json
+cna_valid_unass.jsonï¼šå¾…æ¶ˆæ­§é¢˜ç›®åˆ—è¡¨ï¼ˆå½¢å¦‚ paperID-indexï¼‰
+
+cna_valid_unass_pub.jsonï¼šè®ºæ–‡åº“ï¼ˆpaperID â†’ è®ºæ–‡è¯¦ç»†ä¿¡æ¯ï¼‰
+
+whole_author_profiles.jsonï¼šä½œè€…ç®€å†åº“ï¼ˆauthorID â†’ ä½œè€…profileï¼‰
+
+output/result.jsonï¼šä½ è¦æäº¤/è¯„æµ‹çš„é¢„æµ‹è¾“å‡º
