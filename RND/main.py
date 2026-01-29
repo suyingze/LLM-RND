@@ -57,7 +57,6 @@ def main():
     # 3. 逐条处理
     #test_limit = 100 # 测试前100个
     # for i, task_id in enumerate(unass_list[:test_limit]):
-    # for i, task_id in enumerate(unass_list):
     for i, task_id in enumerate(tasks_to_run):
         current_global_idx = i + 1 + num_skipped
 
