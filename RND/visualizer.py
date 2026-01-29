@@ -54,6 +54,6 @@ if __name__ == "__main__":
     with open("dataset/valid/whole_author_profiles.json", 'r', encoding='utf-8') as f: a_db = json.load(f)
     with open("dataset/valid/whole_author_profiles_pub.json", 'r', encoding='utf-8') as f: w_db = json.load(f)
 
-    test_tasks = ["s6rI9j9e-7"] 
+    test_tasks = ["E1B57TKe-0 "] 
     for tid in test_tasks:
         visualize_task(tid, p_db, a_db, w_db)

@@ -81,7 +81,6 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db):
     new_extracted_count = 0
 
     for auth_id in candidate_ids:
-        # 2. 检查缓存
         if auth_id in full_cache:
             profiles_text[auth_id] = full_cache[auth_id]
             continue
@@ -91,18 +90,21 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db):
         
         all_orgs_normalized = []
         all_collaborators = Counter()
-        titles = []
+        titles_with_meta = []
         keywords_pool = Counter()
 
         for pid in pub_ids[:8]:
             pub_detail = whole_pub_db.get(pid)
             if not pub_detail: continue
             
-            # 标题压缩：只取前 10 个词，防止过长
-            t = pub_detail.get('title', '')
-            titles.append(" ".join(t.split()[:10]))
+            raw_title = pub_detail.get('title', 'Unknown Title')
+            year = pub_detail.get('year', 'N/A')
+            venue = pub_detail.get('venue', 'Unknown Venue')
+            # 格式化为：标题 (Year | Venue)
+            full_title_meta = f"{raw_title} (Year: {year} | Venue: {venue})"
+            titles_with_meta.append(full_title_meta)
             
-            keywords_pool.update(pub_detail.get('keywords', [])[:8])
+            keywords_pool.update(pub_detail.get('keywords', [])[:16])
             
             for auth_entry in pub_detail.get('authors', []):
                 if same_name(auth_entry.get('name', ''), basic_info.get('name', '')):
@@ -116,11 +118,20 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db):
         unique_orgs = merge_similar_orgs(all_orgs_normalized)
         
         desc = f"【 ID: {auth_id}】\n"
-        desc += f"- org: {'; '.join(unique_orgs[:3]) if unique_orgs else '未知'}\n"
-        top_kws = [f"{kw}({c}次)" for kw, c in keywords_pool.most_common(8)]
-        desc += f"- keyword: {', '.join(top_kws)}\n"
-        desc += f"- title: {'; '.join(titles[:2])} 等\n"
-        top_cols = [f"{n}({c}次)" for n, c in all_collaborators.most_common(8)]
+        desc += "- orgs:\n"
+        if unique_orgs:
+            for i, org in enumerate(unique_orgs[:3]): 
+                desc += f"  {i+1}. {org}\n"
+        else:
+            desc += "  (Unknown/Not provided)\n"
+        top_kws = [f"{kw}({c}次)" for kw, c in keywords_pool.most_common(16)]
+        desc += f"- keywords: {', '.join(top_kws)}\n"
+
+        desc += "- works:\n"
+        for i, t_meta in enumerate(titles_with_meta[:3]): 
+            desc += f"  {i+1}. {t_meta}\n"
+            
+        top_cols = [f"{n}({c}次)" for n, c in all_collaborators.most_common(16)]
         desc += f"- collaborator: {', '.join(top_cols)}\n"
         
         full_cache[auth_id] = desc

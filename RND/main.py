@@ -29,6 +29,7 @@ async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results
         # 阶段 A: 粗筛 (本地计算)
         paper_info = pubs_db.get(paper_id, {})
         target_author = get_target_author(paper_info, author_idx)
+        target_name = target_author.get('name', "")
         candidate_ids = get_candidates(target_author, author_db)
 
         if not candidate_ids:
@@ -42,6 +43,7 @@ async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results
             target_id, reason, cand_count, in_t, out_t = await ask_deepseek_async(
                 task_id, paper_info, candidate_profiles, 
                 current_index=current_idx, 
+                target_name=target_name,
                 total_count=total_count
             )
             return task_id, target_id, reason, cand_count, in_t, out_t
@@ -112,7 +114,6 @@ async def main():
                     f.write(json.dumps(analysis_entry, ensure_ascii=False) + "\n")
                 
                 #  更新内存中的字典 (使用 NIL 或具体 ID)
-                # 统一在存入 results 时处理 key
                 key = final_res if final_res != "NIL" else "new_author"
                 if key not in results:
                     results[key] = []
