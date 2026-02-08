@@ -44,7 +44,7 @@ class DisambiguationSignature(dspy.Signature):
     [输出要求]
     若置信度 >= 3，必须返回最可能的 ID。只有在 Level 1 时才允许返回 'NIL'。
     """
-    paper_info = dspy.InputField(desc="含标题、合作者、机构、年份及摘要的信息")
+    paper_prompt = dspy.InputField(desc="含标题、合作者、机构、年份及摘要的信息")
     candidate_profiles = dspy.InputField(desc="候选人画像池")
     
     confidence_level = dspy.OutputField(desc="置信度评分 (1-5)")
@@ -66,32 +66,24 @@ async def ask_deepseek_async(task_id, paper_info, candidate_profiles, target_nam
     """
     num_candidates = len(candidate_profiles)
     all_authors = [a.get('name', '') for a in paper_info.get('authors', [])]
-    
     co_authors = [name for name in all_authors if name != target_name]
-    
     
     paper_text = f"论文标题: {paper_info.get('title', 'N/A')}\n"
     paper_text += f"合作者 (Exclude Target): {', '.join(co_authors)}\n"
     paper_text += f"发表时间: {paper_info.get('year', 'N/A')} | 发表渠道: {paper_info.get('venue', 'N/A')}\n"
-    
     abstract = paper_info.get('abstract', '')
     paper_text += f"摘要简述: {abstract[:150]}..." if abstract else "摘要: N/A"
 
     profiles_text = "\n".join([f"【ID: {k}】\n{v}" for k, v in candidate_profiles.items()])
-    
     in_tokens = get_token_count(paper_text + profiles_text)
-    
     print(f"[{current_index}/{total_count}]  任务提交: {task_id} | 候选人: {num_candidates} | Tokens: {in_tokens}")
 
     model = Disambiguator()
-    
     async_model = dspy.asyncify(model)
     
     try:
-        prediction = await async_model(paper_info=paper_text, candidate_profiles=profiles_text)
-        
+        prediction = await async_model(paper_prompt=paper_text, candidate_profiles=profiles_text)
         out_tokens = get_token_count(prediction.best_id + prediction.reasoning)
-        
         res_id = prediction.best_id.strip().replace("'", "").replace('"', "")
         
         if res_id.upper() in ["NIL", "NONE", "NEW_AUTHOR"]:
