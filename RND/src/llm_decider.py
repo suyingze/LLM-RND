@@ -44,7 +44,7 @@ class DisambiguationSignature(dspy.Signature):
     [输出要求]
     若置信度 >= 3，必须返回最可能的 ID。只有在 Level 1 时才允许返回 'NIL'。
     """
-    paper_prompt = dspy.InputField(desc="含标题、合作者、机构、年份及摘要的信息")
+    paper_features = dspy.InputField(desc="含标题、合作者、机构、年份及摘要的信息")
     candidate_profiles = dspy.InputField(desc="候选人画像池")
     
     confidence_level = dspy.OutputField(desc="置信度评分 (1-5)")
@@ -82,7 +82,7 @@ async def ask_deepseek_async(task_id, paper_info, candidate_profiles, target_nam
     async_model = dspy.asyncify(model)
     
     try:
-        prediction = await async_model(paper_prompt=paper_text, candidate_profiles=profiles_text)
+        prediction = await async_model(paper_features=paper_text, candidate_profiles=profiles_text)
         out_tokens = get_token_count(prediction.best_id + prediction.reasoning)
         res_id = prediction.best_id.strip().replace("'", "").replace('"', "")
         
