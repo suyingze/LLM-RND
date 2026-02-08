@@ -6,6 +6,7 @@ import asyncio
 from src.candidate_generator import get_target_author, get_candidates
 from src.feature_extractor import build_author_profiles 
 from src.llm_decider import ask_deepseek_async
+from src.llm_decider_twostage import ask_deepseek_two_stage_async
 from config import init_dspy 
 
 # 配置路径 
@@ -18,7 +19,10 @@ SAVE_PATH = "output/result.json"
 LOG_PATH = "output/analysis_log.jsonl"
 # 并发控制锁和信号量
 file_lock = asyncio.Lock()
-sem = asyncio.Semaphore(5)  # 限制同时开启 5 个 LLM 请求
+sem = asyncio.Semaphore(9)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
+# 'SINGLE' - 全部强制走单层（用于跑 Baseline 数据）
+# 'HYBRID' - 混合模式：候选人 > 20 走两层，否则走单层
+STRATEGY = 'HYBRID'
 
 async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results, total_count, current_idx):
     """单个任务的异步工作流"""
@@ -33,24 +37,29 @@ async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results
         candidate_ids = get_candidates(target_author, author_db)
 
         if not candidate_ids:
-            return task_id, "NIL", "No candidates", 0, 0, 0
+            return task_id, "NIL", "No candidates", 0, 0, 0, 0, 0
 
         # 阶段 B: 特征提取 (带磁盘缓存)
         candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db)
-
+        num_candidates = len(candidate_profiles)
         # 阶段 C: LLM 决策 (异步 I/O)
         try:
-            target_id, reason, cand_count, in_t, out_t = await ask_deepseek_async(
-                task_id, paper_info, candidate_profiles, 
-                current_index=current_idx, 
-                target_name=target_name,
-                total_count=total_count
-            )
-            return task_id, target_id, reason, cand_count, in_t, out_t
+            if STRATEGY == 'HYBRID' and num_candidates > 20:
+               return await ask_deepseek_two_stage_async(
+                   task_id, paper_info, candidate_profiles, 
+                  current_index=current_idx, 
+                  target_name=target_name,
+                   total_count=total_count
+                )
+            else:
+                target_id, reason, cand_count, in_t, out_t = await ask_deepseek_async(
+                    task_id, paper_info, candidate_profiles, target_name
+                )
+                return task_id, target_id, reason, cand_count, cand_count, in_t, in_t, out_t
+
         except Exception as e:
             print(f" 任务 {task_id} LLM 调用失败: {e}")
-            return task_id, None, str(e), 0, 0, 0
-
+            return task_id, None, str(e), 0, 0, 0, 0, 0
 async def main():
     init_dspy()
 
@@ -76,7 +85,7 @@ async def main():
                         results.setdefault(res_id, []).append(tid)
                 except: continue
 
-    test_limit = 10
+    test_limit = 50
     candidate_pool = unass_list[:test_limit]
     # 只处理不在 processed_tasks 里的任务
     tasks_to_run = [t for t in candidate_pool if t not in processed_tasks]
@@ -88,7 +97,7 @@ async def main():
         return
 
     # 3. 分批异步处理 (Batch Processing)
-    BATCH_SIZE = 5
+    BATCH_SIZE = 9
     for i in range(0, len(tasks_to_run), BATCH_SIZE):
         batch = tasks_to_run[i : i + BATCH_SIZE]
         coros = [
@@ -100,13 +109,19 @@ async def main():
 
         # 4. 批量保存结果
         async with file_lock:
-            for tid, target_id, reason, cand_count, in_t, out_t in batch_results:
+            for tid, target_id, reason, l1_c, l2_c, ts_in, orig_in, out_t in batch_results:
                 final_res = target_id if target_id else "NIL"
-                
-                #  实时追记日志 (追加模式)
                 analysis_entry = {
                     "task_id": tid,
-                    "stats": {"candidates": cand_count, "input_tokens": in_t, "output_tokens": out_t},
+                    "stats": {
+                        "candidates_ratio": f"{l1_c} -> {l2_c}",
+                        "input_tokens_comparison": {
+                        "original_single_layer": orig_in,    # 原单层全量输入
+                        "two_layer_total": ts_in,            # 两层合计输入 (L1+L2)
+                        "saved_tokens": orig_in - ts_in      # 节省的 Token
+                    },
+                    "output_tokens": out_t
+                    },
                     "result": final_res,
                     "reasoning": reason
                 }
