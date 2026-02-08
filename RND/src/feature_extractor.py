@@ -132,7 +132,7 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db):
             desc += f"  {i+1}. {t_meta}\n"
             
         top_cols = [f"{n}({c}次)" for n, c in all_collaborators.most_common(16)]
-        desc += f"- collaborator: {', '.join(top_cols)}\n"
+        desc += f"- collaborators: {', '.join(top_cols)}\n"
         
         full_cache[auth_id] = desc
         profiles_text[auth_id] = desc
