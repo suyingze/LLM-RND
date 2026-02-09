@@ -99,51 +99,85 @@ class TwoStageDisambiguator(dspy.Module):
         return final_ids
 
 
-    def forward(self, paper_text, candidate_profiles_dict,current_index=0, total_count=0):
+    def forward(self, paper_text, candidate_profiles_dict,current_index=0, total_count=0, mode="strict"):
+
         l1_cands_list = []
         for k, v in candidate_profiles_dict.items():
             orgs_section = v.split("- orgs:")[1].split("- keywords:")[0].strip() if "- orgs:" in v else "N/A"
             kws_line = v.split("- keywords: ")[1].split("\n")[0].strip() if "- keywords: " in v else "N/A"
             cols_line = v.split("- collaborators: ")[1].split("\n")[0].strip() if "- collaborators: " in v else "N/A"
-            l1_cands_list.append(f"ID:{k}\nOrgs:\n{orgs_section}\nKeywords: {kws_line}\nCollaborators: {cols_line}")
-        
+            l1_cands_list.append(
+                f"ID:{k}\nOrgs:\n{orgs_section}\nKeywords: {kws_line}\nCollaborators: {cols_line}"
+            )
+
         l1_cands_text = "\n\n".join(l1_cands_list)
         l1_in_tokens = get_token_count(paper_text + l1_cands_text)
-        print(f"[{current_index}/{total_count}] [第一层粗筛结束] 初始候选人: {len(candidate_profiles_dict)} |  Tokens: {l1_in_tokens}")
+
+        print(f"[{current_index}/{total_count}] [第一层粗筛结束] 初始候选人: {len(candidate_profiles_dict)} | Tokens: {l1_in_tokens}")
+
         l1_res = self.l1_filter(paper_info=paper_text, candidate_briefs=l1_cands_text)
         top_ids = self._parse_and_truncate(l1_res.results)
+
         if not top_ids:
-            stage_context = (
-                "第一阶段轻量筛选未筛选出任何入围候选人，"
-                "未发现具有明确弱匹配信号的对象，"
-                "候选人集合保持完整。"
-                "请基于全部候选人进行严格评估，"
-                "若无充分证据必须返回 'NIL'，"
-                "禁止生成候选列表之外的任何作者 ID。"
-            )
+            if mode == "strict":
+                print(f"[{current_index}/{total_count}] [第一层粗筛结束] 未发现匹配候选人，直接终止。")
+                return dspy.Prediction(
+                    confidence_level="1",
+                    best_id="new_author",
+                    reasoning="第一阶段(L1)粗筛未发现任何在领域、机构或合作者方面具有关联的候选人。",
+                    stage_stats={
+                        "two_stage_total_input_tokens": l1_in_tokens,
+                        "l1_cands": len(candidate_profiles_dict),
+                        "l1_tokens": l1_in_tokens,
+                        "l2_cands": 0,
+                        "l2_tokens": 0
+                    }
+                )
+
+            elif mode == "fallback":
+                stage_context = (
+                    "第一阶段轻量筛选未筛选出任何入围候选人，"
+                    "未发现具有明确弱匹配信号的对象，"
+                    "候选人集合保持完整。"
+                    "请基于全部候选人进行严格评估，"
+                    "若无充分证据必须返回 'new_author'，"
+                    "禁止生成候选列表之外的任何作者 ID。"
+                )
+                filtered_profiles = candidate_profiles_dict
+
         else:
             stage_context = (
                 "第一阶段轻量筛选已筛选出入围候选人，"
                 "以下候选人为高潜力对象，"
-                "请优先基于这些候选进行评估。"
+                "请优先基于这些候选进行评估。" 
+                "若无充分证据必须返回 'new_author'，"
+                "禁止生成候选列表之外的任何作者 ID。"
             )
-        if not top_ids:
-            filtered_profiles = candidate_profiles_dict
-        else:
-            filtered_profiles = {k: v for k, v in candidate_profiles_dict.items() if str(k) in top_ids}
+            filtered_profiles = {
+                k: v for k, v in candidate_profiles_dict.items()
+                if str(k) in top_ids
+            }
 
         l2_profiles_text = "\n".join(filtered_profiles.values())
         l2_in_tokens = get_token_count(paper_text + l2_profiles_text)
-        print(f"[{current_index}/{total_count}] [第二层深度分析开始] 输入候选人: {len(filtered_profiles)} |  Tokens: {l2_in_tokens}")
+
+        print(f"[{current_index}/{total_count}] [第二层深度分析开始] 输入候选人: {len(filtered_profiles)} | Tokens: {l2_in_tokens}")
+
         stats = {
-             "two_stage_total_input_tokens": l1_in_tokens + l2_in_tokens,
-             "l1_cands": len(candidate_profiles_dict),
-             "l1_tokens": l1_in_tokens,
-             "l2_cands": len(filtered_profiles),
-             "l2_tokens": l2_in_tokens
+            "two_stage_total_input_tokens": l1_in_tokens + l2_in_tokens,
+            "l1_cands": len(candidate_profiles_dict),
+            "l1_tokens": l1_in_tokens,
+            "l2_cands": len(filtered_profiles),
+            "l2_tokens": l2_in_tokens,
+            "mode": mode,
+            "l1_empty": int(not top_ids)
         }
 
-        res = self.l2_analyzer(stage_context=stage_context,paper_info=paper_text, candidate_profiles=l2_profiles_text)
+        res = self.l2_analyzer(
+            stage_context=stage_context,
+            paper_info=paper_text,
+            candidate_profiles=l2_profiles_text
+        )
         res.stage_stats = stats
         return res
 
