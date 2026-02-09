@@ -219,7 +219,7 @@ async def ask_deepseek_two_stage_async(task_id, paper_info, candidate_profiles, 
         
         # 结果标准化
         if res_id.upper() in ["NIL", "NONE", "NEW_AUTHOR", "NULL"]:
-            final_id = None
+            final_id = "new_author"
         else:
             final_id = res_id
         s = prediction.stage_stats    
