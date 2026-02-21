@@ -28,6 +28,8 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True): #is_test_mode: 是否
     total_preds = 0
     nil_correct = 0 # 正确识别新作者的数量
     nil_total_in_sample = 0 # 样本中实际为新作者的总量
+    nil_false = 0  # 误报数
+    old_total_in_sample = 0    # 真实老作者总数
     
     print("\n" + "="*60)
     print(f"{'任务ID':<15} | {'你的预测':<15} | {'标准答案':<15} | {'状态'}")
@@ -40,25 +42,31 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True): #is_test_mode: 是否
             correct_auth_id = paper_to_author.get(paper_id) # 若没找到则为 None (NIL) 
             
             is_correct = False
-            # 情况 A: 预测为新作者，且 GT 确实没有该专家 (NIL 匹配成功) 
-            if pred_auth_id == "new_author":
-                if correct_auth_id is None:
-                    is_correct = True
-                    nil_correct += 1
-                    nil_total_in_sample += 1
-            
-            # 情况 B: 预测了具体 ID，且与 GT 一致
-            elif pred_auth_id == correct_auth_id:
-                is_correct = True
-            
+            # 1. 先判定总体正确性
+            is_correct = (pred_auth_id == correct_auth_id) or \
+                (pred_auth_id == "new_author" and correct_auth_id is None)
+
+            # 2. 专门针对 NIL (新作者) 的统计逻辑（采用 Recall 维度：真实的新作者里你找对了多少）
+            if correct_auth_id is None:
+                nil_total_in_sample += 1  # 只要事实是新作者，分母就加 1
+                if pred_auth_id == "new_author":
+                    nil_correct += 1      # 只有你预测对了，分子才加 1
+
+            if correct_auth_id is not None:  # 事实是：老作者（已知专家）
+                old_total_in_sample += 1
+                if pred_auth_id == "new_author": # 错误：模型却说是新作者
+                    nil_false += 1
+
+            # 3. 统计 TP
             if is_correct:
                 tp += 1
                 status = " 正确"
+                display_gt = correct_auth_id if correct_auth_id else "NIL"
             else:
-                display_gt = correct_auth_id if correct_auth_id else "NIL(新作者)"
-                status = f" 错误"
+                status = " 错误"
+                display_gt = correct_auth_id if correct_auth_id else "*NIL*"
             
-            print(f"{task_id:<15} | {pred_auth_id:<15} | {str(correct_auth_id):<15} | {status}")
+            print(f"{task_id:<15} | {pred_auth_id:<15} | {str(display_gt):<15} | {status}")
 
     # 4. 计算分数 
     # 在测试阶段，Precision 和 Recall 分母均使用 total_preds，反映当前样本的准确性
@@ -78,7 +86,9 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True): #is_test_mode: 是否
     print(f"  > 局部召回率 (Recall): {recall:.2%}")
     print(f"  > 综合 F1 分数: {f1:.4f}")
     if nil_total_in_sample > 0:
-        print(f"  > 新作者(NIL)识别准确率: {nil_correct/nil_total_in_sample:.2%}")
+        print(f"  > 新作者(NIL)召回率: {nil_correct/nil_total_in_sample:.2%}")
+    fpr = nil_false / old_total_in_sample if old_total_in_sample > 0 else 0
+    print(f" > 新作者误报率 : {fpr:.2%}")
     print("="*60)
 
 
@@ -90,3 +100,4 @@ if __name__ == "__main__":
     GT_FILE = os.path.join(BASE_DIR, "dataset", "valid", "cna_valid_ground_truth.json")
     
     run_evaluation(PRED_FILE, GT_FILE, is_test_mode=True)
+    

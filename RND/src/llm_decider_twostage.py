@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import dspy
 import re
+import json
 import asyncio
 from transformers import AutoTokenizer 
 
@@ -99,7 +100,7 @@ class TwoStageDisambiguator(dspy.Module):
         return final_ids
 
 
-    def forward(self, paper_text, candidate_profiles_dict,current_index=0, total_count=0, mode="strict"):
+    def forward(self, paper_text, candidate_profiles_dict,gt_id=None,current_index=0, total_count=0, mode="strict"):
 
         l1_cands_list = []
         for k, v in candidate_profiles_dict.items():
@@ -118,6 +119,17 @@ class TwoStageDisambiguator(dspy.Module):
         l1_res = self.l1_filter(paper_info=paper_text, candidate_briefs=l1_cands_text)
         top_ids = self._parse_and_truncate(l1_res.results)
 
+        l1_hit = 0
+        is_nil_gt = (gt_id is None)
+
+        if is_nil_gt:
+            l1_hit = 1
+        else:
+            if gt_id in top_ids:
+                l1_hit = 1
+            else:
+                l1_hit = 0
+
         if not top_ids:
             if mode == "strict":
                 print(f"[{current_index}/{total_count}] [第一层粗筛结束] 未发现匹配候选人，直接终止。")
@@ -126,6 +138,7 @@ class TwoStageDisambiguator(dspy.Module):
                     best_id="new_author",
                     reasoning="第一阶段(L1)粗筛未发现任何在领域、机构或合作者方面具有关联的候选人。",
                     stage_stats={
+                        "l1_hit": l1_hit,
                         "two_stage_total_input_tokens": l1_in_tokens,
                         "l1_cands": len(candidate_profiles_dict),
                         "l1_tokens": l1_in_tokens,
@@ -164,6 +177,7 @@ class TwoStageDisambiguator(dspy.Module):
         print(f"[{current_index}/{total_count}] [第二层深度分析开始] 输入候选人: {len(filtered_profiles)} | Tokens: {l2_in_tokens}")
 
         stats = {
+            "l1_hit": l1_hit,
             "two_stage_total_input_tokens": l1_in_tokens + l2_in_tokens,
             "l1_cands": len(candidate_profiles_dict),
             "l1_tokens": l1_in_tokens,
@@ -182,10 +196,12 @@ class TwoStageDisambiguator(dspy.Module):
         return res
 
 
-async def ask_deepseek_two_stage_async(task_id, paper_info, candidate_profiles, target_name, current_index=0, total_count=0):
+
+async def ask_deepseek_two_stage_async(task_id, paper_info, candidate_profiles, target_name, gt_id=None,current_index=0, total_count=0):
     """
-    异步封装层：与单层版保持参数一致
+    异步封装层
     """
+
     authors_list = paper_info.get('authors', [])
     num_candidates = len(candidate_profiles)
     all_authors = [a.get('name', '') for a in paper_info.get('authors', [])]
@@ -212,7 +228,7 @@ async def ask_deepseek_two_stage_async(task_id, paper_info, candidate_profiles, 
     
     try:
         # 执行两层推理
-        prediction = await async_model(paper_text=paper_text, candidate_profiles_dict=candidate_profiles,current_index=current_index, total_count=total_count)
+        prediction = await async_model(paper_text=paper_text, candidate_profiles_dict=candidate_profiles,gt_id=gt_id,current_index=current_index, total_count=total_count)
         
         out_tokens = get_token_count(prediction.best_id + prediction.reasoning)
         res_id = prediction.best_id.strip().replace("'", "").replace('"', "")
@@ -231,8 +247,10 @@ async def ask_deepseek_two_stage_async(task_id, paper_info, candidate_profiles, 
             s["l2_cands"],         
             s["two_stage_total_input_tokens"], 
             original_in_tokens,     
-            out_tokens
+            out_tokens,
+            s["l1_hit"],
+            (gt_id is None)
         )
     except Exception as e:
         print(f" 任务 {task_id} 两层调用异常: {e}")
-        raise e
+        return (task_id, None, str(e), 0, 0, 0, 0, 0, 0, (gt_id is None))
