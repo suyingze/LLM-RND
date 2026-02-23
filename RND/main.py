@@ -101,7 +101,7 @@ async def main():
                         results.setdefault(res_id, []).append(tid)
                 except: continue
 
-    test_limit = 40
+    test_limit = 50
     candidate_pool = unass_list[:test_limit]
     # 只处理不在 processed_tasks 里的任务
     tasks_to_run = [t for t in candidate_pool if t not in processed_tasks]
