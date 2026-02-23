@@ -4,7 +4,7 @@ import os
 import random
 import asyncio
 from src.candidate_generator import get_target_author, get_candidates
-from src.feature_extractor import build_author_profiles 
+from src.full_feature_extractor import build_author_profiles 
 from src.llm_decider import ask_deepseek_async
 from src.llm_decider_twostage import ask_deepseek_two_stage_async
 from config import init_dspy 
@@ -19,7 +19,7 @@ SAVE_PATH = "output/result.json"
 LOG_PATH = "output/analysis_log.jsonl"
 # 并发控制锁和信号量
 file_lock = asyncio.Lock()
-sem = asyncio.Semaphore(3)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
+sem = asyncio.Semaphore(2)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
 # 'SINGLE' - 全部强制走单层（用于跑 Baseline 数据）
 # 'HYBRID' - 混合模式：候选人 > 20 走两层，否则走单层
 STRATEGY = 'HYBRID'
@@ -117,7 +117,7 @@ async def main():
     actual_nil_count = 0
 
     # 3. 分批异步处理 (Batch Processing)
-    BATCH_SIZE = 3
+    BATCH_SIZE = 2
     for i in range(0, len(tasks_to_run), BATCH_SIZE):
         batch = tasks_to_run[i : i + BATCH_SIZE]
         coros = [
