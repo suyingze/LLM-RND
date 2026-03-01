@@ -15,13 +15,12 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True): #is_test_mode: 是否
     with open(gt_path, 'r', encoding='utf-8') as f:
         ground_truth = json.load(f) # {name: {auth_id: [paper_id, ...]}}
 
-    # 2. 建立反向索引：将标准答案展平为 paper_id -> author_id
-    # 如果某篇论文不在这个索引里，说明它在官方定义中属于 NIL (新作者) 
+    # 2. 建立反向索引：如果某篇论文不在这个索引里，说明它在官方定义中属于 NIL (新作者) 
     paper_to_author = {}
     for name, authors in ground_truth.items():
         for auth_id, papers in authors.items():
             for pid in papers:
-                paper_to_author[pid] = auth_id
+                paper_to_author[pid] = auth_id  #用数组将标准答案展平为 paper_id -> author_id 的映射
 
     # 3. 统计指标
     tp = 0  # 正确预测数 (True Positives)
@@ -52,7 +51,7 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True): #is_test_mode: 是否
                 if pred_auth_id == "new_author":
                     nil_correct += 1      # 只有你预测对了，分子才加 1
 
-            if correct_auth_id is not None:  # 事实是：老作者（已知专家）
+            if correct_auth_id is not None:  # 事实是：已知作者
                 old_total_in_sample += 1
                 if pred_auth_id == "new_author": # 错误：模型却说是新作者
                     nil_false += 1
@@ -86,9 +85,9 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True): #is_test_mode: 是否
     print(f"  > 局部召回率 (Recall): {recall:.2%}")
     print(f"  > 综合 F1 分数: {f1:.4f}")
     if nil_total_in_sample > 0:
-        print(f"  > 新作者(NIL)召回率: {nil_correct/nil_total_in_sample:.2%}")
+        print(f"  > 新作者(NIL)召回率: {nil_correct/nil_total_in_sample:.2%}")# 反映在本次测试样例所有真实新作者中，你正确识别出了多少
     fpr = nil_false / old_total_in_sample if old_total_in_sample > 0 else 0
-    print(f" > 新作者误报率 : {fpr:.2%}")
+    print(f" > 新作者误报率 : {fpr:.2%}")# 反映在本次测试样例所有真实老作者中，你错误地标记成新作者的比例
     print("="*60)
 
 

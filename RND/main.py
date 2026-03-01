@@ -3,8 +3,10 @@ import json
 import os
 import random
 import asyncio
+import time
 from src.candidate_generator import get_target_author, get_candidates
-from src.full_feature_extractor import build_author_profiles 
+#from src.full_feature_extractor import build_author_profiles 
+from src.semantic_feature_extractor import build_author_profiles 
 from src.llm_decider import ask_deepseek_async
 from src.llm_decider_twostage import ask_deepseek_two_stage_async
 from config import init_dspy 
@@ -19,10 +21,11 @@ SAVE_PATH = "output/result.json"
 LOG_PATH = "output/analysis_log.jsonl"
 # 并发控制锁和信号量
 file_lock = asyncio.Lock()
-sem = asyncio.Semaphore(2)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
+sem = asyncio.Semaphore(3)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
 # 'SINGLE' - 全部强制走单层（用于跑 Baseline 数据）
 # 'HYBRID' - 混合模式：候选人 > 20 走两层，否则走单层
 STRATEGY = 'HYBRID'
+USE_GPU_MODE = True   # True=GPU串行模式 | False=CPU并发模式
 
 async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results, total_count, current_idx):
     """单个任务的异步工作流"""
@@ -40,7 +43,8 @@ async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results
             return task_id, "NIL", "No candidates", 0, 0, 0, 0, 0, 1, (correct_auth_id is None)
 
         # 阶段 B: 特征提取 (带磁盘缓存)
-        candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db)
+        #candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db)
+        candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper=paper_info)#语义向量模型的特征提取函数需要目标论文
         num_candidates = len(candidate_profiles)
         # 阶段 C: LLM 决策 (异步 I/O)
         try:
@@ -67,6 +71,7 @@ async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results
             print(f" 任务 {task_id} LLM 调用失败: {e}")
             return task_id, None, f"Error: {str(e)}", 0, 0, 0, 0, 0, 0, (correct_auth_id is None)
 async def main():
+    start_time = time.perf_counter()
     init_dspy()
 
     # 1. 加载数据
@@ -117,15 +122,22 @@ async def main():
     actual_nil_count = 0
 
     # 3. 分批异步处理 (Batch Processing)
-    BATCH_SIZE = 2
+    BATCH_SIZE = 1 #(GPU模式建议 1，CPU模式可适当增大)
     for i in range(0, len(tasks_to_run), BATCH_SIZE):
         batch = tasks_to_run[i : i + BATCH_SIZE]
-        coros = [
-            process_single_task(tid, pubs_db, author_db, whole_pub_db, results, test_limit, len(processed_tasks) + i + idx + 1) 
-            for idx, tid in enumerate(batch)
-        ]
+        if USE_GPU_MODE:
+            batch_results = []
+            for idx, tid in enumerate(batch):
+                result = await process_single_task(tid, pubs_db, author_db, whole_pub_db, results, test_limit, len(processed_tasks) + idx + 1)
+                batch_results.append(result)
+        else:
+
+            coros = [
+                process_single_task(tid, pubs_db, author_db, whole_pub_db, results, test_limit, len(processed_tasks) + i + idx + 1) 
+                for idx, tid in enumerate(batch)
+            ]
         
-        batch_results = await asyncio.gather(*coros)
+            batch_results = await asyncio.gather(*coros)
 
         # 4. 批量保存结果
         async with file_lock:
@@ -169,7 +181,17 @@ async def main():
     if total_actual_run > 0:
         overall_hit_rate = (total_l1_hits / total_actual_run) * 100
         id_cases = total_actual_run - actual_nil_count
-        
+
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+
+        hours = int(total_time // 3600)
+        minutes = int((total_time % 3600) // 60)
+        seconds = total_time % 60
+
+    
+    
+    
         print("\n" + "="*50)
         print(f" L1 阶段命中率汇总 (本次运行):")
         print(f"   - 实际处理总数: {total_actual_run}")
@@ -177,6 +199,7 @@ async def main():
         print(f"   - 其中 NIL 样本数: {actual_nil_count}")
         print(f"   - 其中 已有作者(ID)样本数: {id_cases}")
         print(f"   - 总体命中率: {overall_hit_rate:.2f}%")
+        print(f"   - 总运行时间: {hours:02d}:{minutes:02d}:{seconds:05.2f}")
         print("="*50 + "\n")
     print(f"\n处理完成！")
 
