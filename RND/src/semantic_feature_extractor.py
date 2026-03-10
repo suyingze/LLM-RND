@@ -114,24 +114,24 @@ def same_name(a: str, b: str) -> bool:
     # 情况 3: 多段名，首尾互换
     return False
     
+@torch.no_grad()
 def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: Dict):
+    MODEL.max_seq_length = 256
     profiles_text = {}
     # 预处理待消歧论文的特征向量
     target_title = target_paper.get('title', '')
     target_kws = " ".join(target_paper.get('keywords', []))
     target_text = f"{target_title} {target_kws}".strip()
 
-
     target_embedding = MODEL.encode(
         [target_text],
-        batch_size=16,
+        batch_size=1,
         convert_to_tensor=True,
         normalize_embeddings=True
     )[0]
     author_data = {}      # 存储每个作者的统计信息
-    all_texts = []        # 所有候选论文文本
-    text_owner = []       # 每条文本属于哪个作者
-
+    #all_texts = []        # 所有候选论文文本
+    #text_owner = []       # 每条文本属于哪个作者
     #print("target_embedding shape:", target_embedding.shape)
     
     for auth_id in candidate_ids:
@@ -141,7 +141,6 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
         all_orgs_normalized = []
         global_collaborators = Counter()
         pub_texts = []
-
         #  收集该候选人名下的所有论文详情
         for pid in pub_ids:
             pub_detail = whole_pub_db.get(pid)
@@ -150,8 +149,6 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
             text = f"{pub_detail.get('title','')} {' '.join(pub_detail.get('keywords',[]))}".strip()
             if text:
                 pub_texts.append(text)
-                all_texts.append(text)
-                text_owner.append(auth_id)
 
             # 统计机构 (全局)
             for auth_entry in pub_detail.get('authors', []):
@@ -163,43 +160,23 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
                     name = auth_entry.get('name')
                     if name: global_collaborators[name] += 1
 
-        author_data[auth_id] = {
-            "orgs": all_orgs_normalized,
-            "collabs": global_collaborators,
-            "pub_count": len(pub_texts)
-        }
-
-    if len(all_texts) > 0:
-        all_embeddings = MODEL.encode(
-            all_texts,
-            batch_size=32,
-            convert_to_tensor=True,
-            normalize_embeddings=True
-        )
-    else:
-        all_embeddings = []
-        print(" No publication texts found!")
-
-    idx = 0
-
-    for auth_id in candidate_ids:
-
-        pub_count = author_data[auth_id]["pub_count"]
-
+        pub_count = len(pub_texts)
         if pub_count == 0:
             profiles_text[auth_id] = f"【 ID: {auth_id} 】\n(No publications found)"
             continue
 
-        cand_embeddings = all_embeddings[idx: idx + pub_count]
-        idx += pub_count
-
-
+        cand_embeddings = MODEL.encode(
+            pub_texts,
+            batch_size=4,
+            convert_to_tensor=True,
+            normalize_embeddings=True
+        )
+        #取相似得分TOPn
         scores = cand_embeddings @ target_embedding
-
         topk = torch.topk(scores, k=min(5, pub_count))
 
-        unique_orgs = list(set(author_data[auth_id]["orgs"]))
-        top_collabs = author_data[auth_id]["collabs"].most_common(5)
+        unique_orgs = list(set(all_orgs_normalized))
+        top_collabs = global_collaborators.most_common(5)
 
         desc = f"【 ID: {auth_id} 】\n"
         desc += "- orgs:\n"
@@ -212,17 +189,17 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
         desc += "- keywords: "
         top_keywords = []
         for i in topk.indices.tolist():
-            text = all_texts[idx - pub_count + i]
+            text = pub_texts[i]
             words = re.findall(r"[a-zA-Z]{4,}", text.lower())
             top_keywords.extend(words)
         kw_counter = Counter(top_keywords)
         top_kws = [kw for kw, _ in kw_counter.most_common(10)]
+
         desc += ", ".join(top_kws) if top_kws else "N/A"
         desc += "\n"
-        
         desc += "- works:\n"
         for i, rel_idx in enumerate(topk.indices.tolist()):
-            paper_text = all_texts[idx - pub_count + rel_idx]
+            paper_text = pub_texts[rel_idx]
             desc += f"  {i+1}. {paper_text[:150]}\n"
         desc += "- collaborators: "
         if top_collabs:
@@ -232,7 +209,10 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
         desc += "\n"
 
         profiles_text[auth_id] = desc
-        
+
+        del cand_embeddings
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     return profiles_text
 
