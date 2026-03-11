@@ -4,14 +4,31 @@ import os
 import re
 import torch
 import numpy as np
+import glob
+import huggingface_hub
 from collections import Counter
 from typing import Dict, List
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 
+
+os.environ['HF_HUB_OFFLINE'] = '1'
+os.environ['TRANSFORMERS_OFFLINE'] = '1'
+os.environ['SENTENCE_TRANSFORMERS_OFFLINE'] = '1' 
+
+snapshot_pattern = os.path.expanduser("~/.cache/huggingface/hub/models--BAAI--bge-m3/snapshots/*")
+snapshot_paths = glob.glob(snapshot_pattern)
+if snapshot_paths:
+    snapshot_path = snapshot_paths[0]  # 取第一个找到的快照
+    print(f"找到本地模型: {snapshot_path}")
+    print(f"路径是否存在: {os.path.exists(snapshot_path)}")
+else:
+    print("未找到本地模型缓存，尝试从网络下载...")
+    # 如果找不到，才从网络下载（临时关闭离线模式）
+    os.environ.pop('HF_HUB_OFFLINE', None)
+    snapshot_path = "BAAI/bge-m3"  
 device = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL = SentenceTransformer("BAAI/bge-m3", device=device)# 1024维语义向量模型，专门针对中文优化，适合做文本相似度计算和语义搜索
-print("Using device:", device)
+MODEL = SentenceTransformer(snapshot_path, device=device)
 
 CACHE_FILE = "output/profile_cache.json"
 

@@ -7,6 +7,7 @@ import time
 from src.candidate_generator import get_target_author, get_candidates
 #from src.full_feature_extractor import build_author_profiles 
 from src.semantic_feature_extractor import build_author_profiles 
+#from src.llama_semantic_feature_extractor import build_author_profiles
 from src.llm_decider import ask_deepseek_async
 from src.llm_decider_twostage import ask_deepseek_two_stage_async
 from config import init_dspy 
@@ -21,11 +22,11 @@ SAVE_PATH = "output/result.json"
 LOG_PATH = "output/analysis_log.jsonl"
 # 并发控制锁和信号量
 file_lock = asyncio.Lock()
-sem = asyncio.Semaphore(3)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
+sem = asyncio.Semaphore(5)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
 # 'SINGLE' - 全部强制走单层（用于跑 Baseline 数据）
 # 'HYBRID' - 混合模式：候选人 > 20 走两层，否则走单层
 STRATEGY = 'HYBRID'
-USE_GPU_MODE = True   # True=GPU串行模式 | False=CPU并发模式
+USE_GPU_MODE =  True   # True=GPU串行模式 | False=CPU并发模式
 
 async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results, total_count, current_idx):
     """单个任务的异步工作流"""
@@ -106,13 +107,13 @@ async def main():
                         results.setdefault(res_id, []).append(tid)
                 except: continue
 
-    test_limit = 50
+    test_limit = 15
     candidate_pool = unass_list[:test_limit]
     # 只处理不在 processed_tasks 里的任务
     tasks_to_run = [t for t in candidate_pool if t not in processed_tasks]
-    
+    processed_count = len(processed_tasks)
     print(f" 进度统计：总测试量 {test_limit} | 已完成 {len(processed_tasks)} | 待处理 {len(tasks_to_run)}")
-
+    current_global_idx = processed_count
     if not tasks_to_run:
         print(" 所有任务已在断点记录中，无需重跑。")
         return
@@ -122,13 +123,14 @@ async def main():
     actual_nil_count = 0
 
     # 3. 分批异步处理 (Batch Processing)
-    BATCH_SIZE = 1 #(GPU模式建议 1，CPU模式可适当增大)
+    BATCH_SIZE = 10 #(GPU模式建议 1，CPU模式可适当增大)
     for i in range(0, len(tasks_to_run), BATCH_SIZE):
         batch = tasks_to_run[i : i + BATCH_SIZE]
         if USE_GPU_MODE:
             batch_results = []
             for idx, tid in enumerate(batch):
-                result = await process_single_task(tid, pubs_db, author_db, whole_pub_db, results, test_limit, len(processed_tasks) + idx + 1)
+                current_global_idx += 1  # 每处理一个就增加
+                result = await process_single_task(tid, pubs_db, author_db, whole_pub_db, results, test_limit,  current_global_idx)
                 batch_results.append(result)
         else:
 
