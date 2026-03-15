@@ -10,8 +10,8 @@ from collections import Counter
 from typing import Dict, List
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
-
-
+from safetensors.torch import load_file
+VECTOR_CACHE_DIR = "output/vector_cache"
 os.environ['HF_HUB_OFFLINE'] = '1'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['SENTENCE_TRANSFORMERS_OFFLINE'] = '1' 
@@ -135,89 +135,105 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
     MODEL.max_seq_length = 256
     MODEL.half()
     profiles_text = {}
-    # 预处理待消歧论文的特征向量
-    target_title = target_paper.get('title', '')
-    target_kws = " ".join(target_paper.get('keywords', []))
-    target_text = f"{target_title} {target_kws}".strip()
 
+    target_text = f"{target_paper.get('title', '')} {' '.join(target_paper.get('keywords', []))}".strip()
     target_embedding = MODEL.encode(
         [target_text],
         batch_size=1,
         convert_to_tensor=True,
         normalize_embeddings=True
     ).half()[0]
-    author_data = {}      # 存储每个作者的统计信息
-    #all_texts = []        # 所有候选论文文本
-    #text_owner = []       # 每条文本属于哪个作者
-    #print("target_embedding shape:", target_embedding.shape)
-    
+   
     for auth_id in candidate_ids:
+        cache_path = os.path.join(VECTOR_CACHE_DIR, f"{auth_id}.safetensors")
         basic_info = author_db.get(auth_id, {})
         pub_ids = basic_info.get('pubs', [])
-        
-        all_orgs_normalized = []
-        global_collaborators = Counter()
-        pub_texts = []
-        #  收集该候选人名下的所有论文详情
-        for pid in pub_ids:
+
+        current_author_name = basic_info.get('name', '')
+
+        if os.path.exists(cache_path):
+            data = load_file(cache_path)
+            cand_embeddings = data["embeddings"].to(device).half()
+        else:
+            pub_texts_all = []
+            for pid in pub_ids:
+                p = whole_pub_db.get(pid, {})
+                pub_texts_all.append(f"{p.get('title','')} {' '.join(p.get('keywords',[]))}".strip())
+            if not pub_texts_all: continue
+            cand_embeddings = MODEL.encode(pub_texts_all, batch_size=16, convert_to_tensor=True,normalize_embeddings=True).half()
+
+        scores = cand_embeddings @ target_embedding
+        # 取 top-k 论文来动态构建机构和合作者信息，k 的值可以根据实际情况调整
+        #top_k_val = min(6, cand_embeddings.size(0))
+        #topk = torch.topk(scores, k=top_k_val)
+        #top_indices = topk.indices.tolist()
+
+        # 阈值过滤 + 保底机制，防止搜索质量过差或过爆炸
+        THRESHOLD = 0.8   # 阈值
+        MIN_KEEP = 3       # 搜索质量差时的保底数
+        MAX_KEEP = 10      # 搜索结果爆炸时的封顶数
+        mask = scores >= THRESHOLD
+        high_score_indices = torch.nonzero(mask).squeeze(-1)
+        # 获取按分数降序排列的所有索引
+        sorted_indices = torch.argsort(scores, descending=True)
+
+        if high_score_indices.numel() < MIN_KEEP:
+            top_indices = sorted_indices[:min(MIN_KEEP, len(scores))].tolist()
+        else:
+            top_indices = []
+            for idx in sorted_indices:
+                if scores[idx] >= THRESHOLD and len(top_indices) < MAX_KEEP:
+                    top_indices.append(idx.item())
+                else:
+                    break
+
+        dynamic_orgs = []
+        dynamic_collabs = Counter()
+        top_works_texts = []
+        for idx in top_indices:
+            pid = pub_ids[idx]
             pub_detail = whole_pub_db.get(pid)
             if not pub_detail: continue
             
-            text = f"{pub_detail.get('title','')} {' '.join(pub_detail.get('keywords',[]))}".strip()
-            if text:
-                pub_texts.append(text)
+            # 拼接论文文本用于关键词提取和 works 展示
+            p_text = f"{pub_detail.get('title','')} {' '.join(pub_detail.get('keywords',[]))}".strip()
+            top_works_texts.append(p_text)
 
-            # 统计机构 (全局)
+            # 提取机构和合作者
             for auth_entry in pub_detail.get('authors', []):
-                if same_name(auth_entry.get('name', ''), basic_info.get('name', '')):
+                entry_name = auth_entry.get('name', '')
+                if same_name(entry_name, current_author_name):
                     if auth_entry.get('org'):
                         norm_org = normalize_org(auth_entry.get('org'))
-                        if norm_org: all_orgs_normalized.append(norm_org)
+                        if norm_org: dynamic_orgs.append(norm_org)
                 else:
-                    name = auth_entry.get('name')
-                    if name: global_collaborators[name] += 1
+                    if entry_name: dynamic_collabs[entry_name] += 1
 
-        pub_count = len(pub_texts)
-        if pub_count == 0:
-            profiles_text[auth_id] = f"【 ID: {auth_id} 】\n(No publications found)"
-            continue
 
-        cand_embeddings = MODEL.encode(
-            pub_texts,
-            batch_size=16,
-            convert_to_tensor=True,
-            normalize_embeddings=True
-        ).half()
-        #取相似得分TOPn
-        scores = cand_embeddings @ target_embedding
-        topk = torch.topk(scores, k=min(5, pub_count))
-
-        unique_orgs = list(set(all_orgs_normalized))
-        top_collabs = global_collaborators.most_common(5)
+        unique_orgs = list(dict.fromkeys(dynamic_orgs)) 
+        top_collabs = dynamic_collabs.most_common(5)
 
         desc = f"【 ID: {auth_id} 】\n"
         desc += "- orgs:\n"
         if unique_orgs:
             for i, org in enumerate(unique_orgs[:5]):
-                desc += f"  {i+1}. {org}\n"
+                desc += f"  {i+1}. {org}\n" 
         else:
             desc += "  (Unknown)\n"
 
         desc += "- keywords: "
         top_keywords = []
-        for i in topk.indices.tolist():
-            text = pub_texts[i]
+        for text in top_works_texts:
             words = re.findall(r"[a-zA-Z]{4,}", text.lower())
             top_keywords.extend(words)
         kw_counter = Counter(top_keywords)
         top_kws = [kw for kw, _ in kw_counter.most_common(10)]
-
         desc += ", ".join(top_kws) if top_kws else "N/A"
         desc += "\n"
         desc += "- works:\n"
-        for i, rel_idx in enumerate(topk.indices.tolist()):
-            paper_text = pub_texts[rel_idx]
+        for i, paper_text in enumerate(top_works_texts):
             desc += f"  {i+1}. {paper_text[:150]}\n"
+
         desc += "- collaborators: "
         if top_collabs:
             desc += ", ".join([c[0] for c in top_collabs])
@@ -226,8 +242,6 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
         desc += "\n"
 
         profiles_text[auth_id] = desc
-
         del cand_embeddings
 
     return profiles_text
-

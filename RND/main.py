@@ -6,7 +6,8 @@ import asyncio
 import time
 from src.candidate_generator import get_target_author, get_candidates
 #from src.full_feature_extractor import build_author_profiles 
-from src.semantic_feature_extractor import build_author_profiles 
+#from src.semantic_feature_extractor import build_author_profiles 
+from src.bge_feature_extractor import build_author_profiles
 #from src.llama_semantic_feature_extractor import build_author_profiles
 from src.llm_decider import ask_deepseek_async
 from src.llm_decider_twostage import ask_deepseek_two_stage_async
@@ -26,31 +27,31 @@ sem = asyncio.Semaphore(5)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/S
 # 'SINGLE' - 全部强制走单层（用于跑 Baseline 数据）
 # 'HYBRID' - 混合模式：候选人 > 20 走两层，否则走单层
 STRATEGY = 'HYBRID'
-USE_GPU_MODE =  True   # True=GPU串行模式 | False=CPU并发模式
+USE_GPU_MODE =  False   # True=GPU串行模式 | False=CPU并发模式
 
 async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results, total_count, current_idx):
     """单个任务的异步工作流"""
-    async with sem:
-        paper_id, author_idx = task_id.split('-')
-        author_idx = int(author_idx)
 
-        # 阶段 A: 粗筛 (本地计算)
-        paper_info = pubs_db.get(paper_id, {})
-        target_author = get_target_author(paper_info, author_idx)
-        target_name = target_author.get('name', "")
-        candidate_ids = get_candidates(target_author, author_db)
-        correct_auth_id = paper_to_author.get(paper_id)
-        if not candidate_ids:
-            return task_id, "NIL", "No candidates", 0, 0, 0, 0, 0, 1, (correct_auth_id is None)
+    paper_id, author_idx = task_id.split('-')
+    author_idx = int(author_idx)
 
-        # 阶段 B: 特征提取 (带磁盘缓存)
-        #candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db)
-        candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper=paper_info)#语义向量模型的特征提取函数需要目标论文
-        num_candidates = len(candidate_profiles)
-        # 阶段 C: LLM 决策 (异步 I/O)
-        try:
-            paper_id = task_id.split('-')[0]
-            correct_auth_id = paper_to_author.get(paper_id)
+    # 阶段 A: 粗筛 (本地计算)
+    paper_info = pubs_db.get(paper_id, {})
+    target_author = get_target_author(paper_info, author_idx)
+    target_name = target_author.get('name', "")
+    candidate_ids = get_candidates(target_author, author_db)
+    correct_auth_id = paper_to_author.get(paper_id)
+    if not candidate_ids:
+        return task_id, "NIL", "No candidates", 0, 0, 0, 0, 0, 1, (correct_auth_id is None)
+
+    # 阶段 B: 特征提取 (带磁盘缓存)
+    #candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db)
+    candidate_profiles = build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper=paper_info)#语义向量模型的特征提取函数需要目标论文
+    num_candidates = len(candidate_profiles)
+
+    # 阶段 C: LLM 决策 (异步 I/O)
+    try:
+        async with sem:   # 只锁 LLM
 
             if STRATEGY == 'HYBRID' and num_candidates > 20:
                return await ask_deepseek_two_stage_async(
@@ -68,9 +69,9 @@ async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results
                 is_nil_dummy = (correct_auth_id is None)
                 return (task_id, target_id, reason, cand_count, cand_count, in_t, in_t, out_t, l1_hit_dummy, is_nil_dummy)
 
-        except Exception as e:
-            print(f" 任务 {task_id} LLM 调用失败: {e}")
-            return task_id, None, f"Error: {str(e)}", 0, 0, 0, 0, 0, 0, (correct_auth_id is None)
+    except Exception as e:
+        print(f" 任务 {task_id} LLM 调用失败: {e}")
+        return task_id, None, f"Error: {str(e)}", 0, 0, 0, 0, 0, 0, (correct_auth_id is None)
 async def main():
     start_time = time.perf_counter()
     init_dspy()
@@ -107,7 +108,7 @@ async def main():
                         results.setdefault(res_id, []).append(tid)
                 except: continue
 
-    test_limit = 15
+    test_limit = 100
     candidate_pool = unass_list[:test_limit]
     # 只处理不在 processed_tasks 里的任务
     tasks_to_run = [t for t in candidate_pool if t not in processed_tasks]
@@ -123,7 +124,7 @@ async def main():
     actual_nil_count = 0
 
     # 3. 分批异步处理 (Batch Processing)
-    BATCH_SIZE = 10 #(GPU模式建议 1，CPU模式可适当增大)
+    BATCH_SIZE = 20 #(GPU模式建议 1，CPU模式可适当增大)
     for i in range(0, len(tasks_to_run), BATCH_SIZE):
         batch = tasks_to_run[i : i + BATCH_SIZE]
         if USE_GPU_MODE:

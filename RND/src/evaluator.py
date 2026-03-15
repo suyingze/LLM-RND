@@ -81,8 +81,8 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True): #is_test_mode: 是否
     print(f" 测试阶段评估报告 (Mode: {'Test' if is_test_mode else 'Full'}):")
     print(f"  > 已完成任务总数: {total_preds}")
     print(f"  > 预测正确总数: {tp}")
-    print(f"  > 局部准确率 (Precision): {precision:.2%}")
-    print(f"  > 局部召回率 (Recall): {recall:.2%}")
+    print(f"  > 准确率 (Precision): {precision:.2%}")
+    #print(f"  > 召回率 (Recall): {recall:.2%}")
     print(f"  > 综合 F1 分数: {f1:.4f}")
     if nil_total_in_sample > 0:
         print(f"  > 新作者(NIL)召回率: {nil_correct/nil_total_in_sample:.2%}")# 反映在本次测试样例所有真实新作者中，你正确识别出了多少
