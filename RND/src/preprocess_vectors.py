@@ -6,6 +6,7 @@ import glob
 from tqdm import tqdm
 from safetensors.torch import save_file
 from sentence_transformers import SentenceTransformer
+from util import get_vector_cache_path, build_feature_text
 
 # --- 配置区 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +26,7 @@ snapshot_path = snapshot_paths[0] if snapshot_paths else "BAAI/bge-m3"
 
 print(f"正在加载模型: {snapshot_path}")
 MODEL = SentenceTransformer(snapshot_path, device=device)
-MODEL.max_seq_length = 256
+MODEL.max_seq_length = 512
 MODEL.half() # 针对3060显存优化
 
 def run_preprocessing():
@@ -42,8 +43,9 @@ def run_preprocessing():
         all_auth_ids = all_auth_ids[:TEST_AUTHOR_NUM]
     print(f"共发现 {len(all_auth_ids)} 个作者，开始离线计算向量...")
 
+    current_cache_dir = get_vector_cache_path()
     for auth_id in tqdm(all_auth_ids):
-        cache_path = os.path.join(VECTOR_CACHE_DIR, f"{auth_id}.safetensors")
+        cache_path = os.path.join(current_cache_dir, f"{auth_id}.safetensors")
         
         # 如果已经存在则跳过，方便断点续传
         if os.path.exists(cache_path):
@@ -57,7 +59,7 @@ def run_preprocessing():
             pub_detail = whole_pub_db.get(pid)
             if not pub_detail: continue
             # 文本构建逻辑必须与主程序一致！
-            text = f"{pub_detail.get('title','')} {' '.join(pub_detail.get('keywords',[]))}".strip()
+            text = build_feature_text(pub_detail)
             if text:
                 pub_texts.append(text)
 

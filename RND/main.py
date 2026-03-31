@@ -12,6 +12,7 @@ from src.bge_feature_extractor import build_author_profiles
 from src.llm_decider import ask_deepseek_async
 from src.llm_decider_twostage import ask_deepseek_two_stage_async
 from config import init_dspy 
+from src.util import get_vector_cache_path, build_feature_text
 
 # 配置路径 
 DATA_DIR = "dataset/valid"
