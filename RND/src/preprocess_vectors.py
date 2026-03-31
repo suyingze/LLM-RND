@@ -13,7 +13,7 @@ DATA_DIR = os.path.join(BASE_DIR, "..", "dataset", "valid")
 VECTOR_CACHE_DIR = os.path.join(BASE_DIR, "..", "output", "vector_cache")
 WHOLE_AUTHOR_PATH = os.path.join(DATA_DIR, "whole_author_profiles.json")
 WHOLE_PUB_PATH = os.path.join(DATA_DIR, "whole_author_profiles_pub.json")
-TEST_AUTHOR_NUM = None # 仅处理前100个作者用于测试，正式运行时设为 None 或较大值
+TEST_AUTHOR_NUM = None # 正式运行时设为 None 遍历全部作者
 os.makedirs(VECTOR_CACHE_DIR, exist_ok=True)
 
 # --- 模型加载 ---
@@ -56,7 +56,7 @@ def run_preprocessing():
         for pid in pub_ids:
             pub_detail = whole_pub_db.get(pid)
             if not pub_detail: continue
-            # 文本构建逻辑必须与你主程序一致！
+            # 文本构建逻辑必须与主程序一致！
             text = f"{pub_detail.get('title','')} {' '.join(pub_detail.get('keywords',[]))}".strip()
             if text:
                 pub_texts.append(text)

@@ -164,28 +164,27 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
 
         scores = cand_embeddings @ target_embedding
         # 取 top-k 论文来动态构建机构和合作者信息，k 的值可以根据实际情况调整
-        #top_k_val = min(6, cand_embeddings.size(0))
-        #topk = torch.topk(scores, k=top_k_val)
-        #top_indices = topk.indices.tolist()
+        top_k_val = min(5, cand_embeddings.size(0))
+        topk = torch.topk(scores, k=top_k_val)
+        top_indices = topk.indices.tolist()
 
-        # 阈值过滤 + 保底机制，防止搜索质量过差或过爆炸
-        THRESHOLD = 0.8   # 阈值
-        MIN_KEEP = 3       # 搜索质量差时的保底数
-        MAX_KEEP = 10      # 搜索结果爆炸时的封顶数
-        mask = scores >= THRESHOLD
-        high_score_indices = torch.nonzero(mask).squeeze(-1)
-        # 获取按分数降序排列的所有索引
-        sorted_indices = torch.argsort(scores, descending=True)
+        # THRESHOLD = 0.67 # 阈值
+        # MIN_KEEP = 3       # 搜索质量差时的保底数
+        # MAX_KEEP = 10      # 搜索结果爆炸时的封顶数
+        # mask = scores >= THRESHOLD
+        # high_score_indices = torch.nonzero(mask).squeeze(-1)
+        # # 获取按分数降序排列的所有索引
+        # sorted_indices = torch.argsort(scores, descending=True)
 
-        if high_score_indices.numel() < MIN_KEEP:
-            top_indices = sorted_indices[:min(MIN_KEEP, len(scores))].tolist()
-        else:
-            top_indices = []
-            for idx in sorted_indices:
-                if scores[idx] >= THRESHOLD and len(top_indices) < MAX_KEEP:
-                    top_indices.append(idx.item())
-                else:
-                    break
+        # if high_score_indices.numel() < MIN_KEEP:
+        #     top_indices = sorted_indices[:min(MIN_KEEP, len(scores))].tolist()
+        # else:
+        #     top_indices = []
+        #     for idx in sorted_indices:
+        #         if scores[idx] >= THRESHOLD and len(top_indices) < MAX_KEEP:
+        #             top_indices.append(idx.item())
+        #         else:
+        #             break
 
         dynamic_orgs = []
         dynamic_collabs = Counter()
