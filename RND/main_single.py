@@ -12,15 +12,16 @@ from src.bge_feature_extractor import build_author_profiles
 # from src.llm_decider_twostage import ask_deepseek_two_stage_async
 # LLM 模式:
 # - "simple_concat": 实验3基线，简单拼接（不启用两阶段）
-# - "prompt_engineered": 工程化提示词版本（可启用 HYBRID 两阶段）
+# - "prompt_engineered": 工程化提示词版本（单层版本同样支持）
 LLM_MODE = "prompt_engineered"
 
 if LLM_MODE == "simple_concat":
     from src.llm_simple_concat import ask_deepseek_async
-    ask_deepseek_two_stage_async = None
 else:
     from src.llm1 import ask_deepseek_async
-    from src.llm2 import ask_deepseek_two_stage_async
+
+# 单层实验入口：不导入两阶段函数，强制 SINGLE
+ask_deepseek_two_stage_async = None
 from config import init_dspy 
 from src.util import get_vector_cache_path, build_feature_text
 
@@ -36,11 +37,7 @@ LOG_PATH = "output/analysis_log.jsonl"
 file_lock = asyncio.Lock()
 sem = asyncio.Semaphore(10)  # 限制同时开启 9 个 LLM 请求 HYBRID模式/SINGLE建议 3
 # 'SINGLE' - 全部强制走单层（用于跑 Baseline 数据）
-# 'HYBRID' - 混合模式：候选人 > 20 走两层，否则走单层
-# simple_concat 模式下会自动强制为 SINGLE，避免误调用两阶段函数
-STRATEGY = 'HYBRID'
-if LLM_MODE == "simple_concat":
-    STRATEGY = "SINGLE"
+STRATEGY = 'SINGLE'
 USE_GPU_MODE =  False   # True=GPU串行模式 | False=CPU并发模式
 
 async def process_single_task(task_id, pubs_db, author_db, whole_pub_db, results, total_count, current_idx):
@@ -127,7 +124,7 @@ async def main():
                         results.setdefault(res_id, []).append(tid)
                 except: continue
 
-    test_limit = 150
+    test_limit = 100
     candidate_pool = unass_list[:test_limit]
     # 只处理不在 processed_tasks 里的任务
     tasks_to_run = [t for t in candidate_pool if t not in processed_tasks]

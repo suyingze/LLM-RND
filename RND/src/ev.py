@@ -15,63 +15,71 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True):
     with open(gt_path, 'r', encoding='utf-8') as f:
         ground_truth = json.load(f) # {name: {auth_id: [paper_id, ...]}}
 
-    # 2. 建立全量真值索引：paper_id -> author_id
+    # 2. 建立全量真值索引
     paper_to_author_map = {}
     for name, authors in ground_truth.items():
+        # 终极清洗：去掉所有下划线、空格，并转小写
+        clean_name = name.replace("_", "").replace(" ", "").lower() 
         for auth_id, papers in authors.items():
             for pid in papers:
-                paper_to_author_map[pid] = auth_id
-
-    # 3. 整理预测结果：author_id -> {paper_id}
+                paper_to_author_map[(clean_name, pid)] = auth_id 
+    
+    # 3. 整理预测结果
     author_pred_papers = defaultdict(set)
-    all_task_papers = set() 
+    all_task_papers_info = set() # 存储 (name, pid)
+    all_pids = set()             # 新增：存储纯 pid 集合用于后续计算
+
     for pred_auth_id, task_ids in predictions.items():
         for task_id in task_ids:
-            pid = task_id.split('-')[0]
+            parts = task_id.split('-')
+            pid = parts[0].strip()
+            raw_name = parts[1].strip() if len(parts) > 1 else "unknown"
+            # 这里的清洗逻辑必须和上面完全一致
+            clean_name = raw_name.replace("_", "").replace(" ", "").lower()
+        
             author_pred_papers[pred_auth_id].add(pid)
-            all_task_papers.add(pid)
+            all_task_papers_info.add((clean_name, pid))
+            all_pids.add(pid)
 
-    # 4. 核心：根据这 100 篇论文确定 M 个作者
-    # 逻辑：只要论文不在 paper_to_author_map 里，它就是 NIL 这一组的
+    # 4. 根据 (name, pid) 确定真值作者
     active_true_authors = set()
     author_true_papers = defaultdict(set)
 
-    for pid in all_task_papers:
-        correct_auth_id = paper_to_author_map.get(pid)
+    for name, pid in all_task_papers_info:
+        correct_auth_id = paper_to_author_map.get((name, pid))
+    
         if correct_auth_id is not None:
-            # 该论文属于已知作者
             active_true_authors.add(correct_auth_id)
             author_true_papers[correct_auth_id].add(pid)
         else:
-            # 重要：GT 中找不到，说明正确答案是 NIL
+            # 标记为新作者 (NIL)
             active_true_authors.add("new_author")
             author_true_papers["new_author"].add(pid)
 
-    # 5. 指标统计 (严格对齐公式)
-    # M = 此时 active_true_authors 只包含这 100 题涉及的真实作者（含NIL）
+    # 5. 指标统计
     all_author_ids = active_true_authors 
-    TUP = len(all_task_papers) if is_test_mode else 13914 # 参与评估的所有论文总数。
+    TUP = len(all_task_papers_info) # 总任务数
     
     WeightedPrecision = 0
     WeightedRecall = 0
 
+    print(f"{'Author ID':<25} | {'CPA':<5} | {'TPA':<5} | {'UPA':<5} | {'P':<8} | {'R':<8}")
+    print("-" * 85)
+
     for auth_id in all_author_ids:
         true_set = author_true_papers[auth_id]
-        pred_set = author_pred_papers[auth_id] # 你的模型预测给该 ID 的论文
+        pred_set = author_pred_papers.get(auth_id, set()) # 使用 .get 防止 Key 缺失
         
-        # --- 变量对应公式 ---
-        CPA = len(true_set & pred_set)    # CorrectlyPredictedToTheAuthor 模型预测正确且确实属于该作者的论文数。
-        TPA = len(pred_set)               # TotalPredictedToTheAuthor 模型预测属于该作者的所有论文总数。
-        UPA = len(true_set)               # UnassignedPaperOfTheAuthor 该作者在真值（Ground Truth）中实际拥有的论文总数。
+        CPA = len(true_set & pred_set)
+        TPA = len(pred_set)
+        UPA = len(true_set)
         
         Precision_i = CPA / TPA if TPA > 0 else 0
         Recall_i = CPA / UPA if UPA > 0 else 0
         Weight_i = UPA / TUP
         
-        # 加权求和: sum(Metric_i * weight_i)
         WeightedPrecision += Precision_i * Weight_i
         WeightedRecall += Recall_i * Weight_i
-
         
         display_id = "NIL (new_author)" if auth_id == "new_author" else auth_id
         print(f"{str(display_id):<25} | {CPA:<5} | {TPA:<5} | {UPA:<5} | {Precision_i:<8.1%} | {Recall_i:<8.1%}")
@@ -82,13 +90,14 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True):
     else:
         WeightedF1 = 0
 
-    # 7. 保留 NIL 监控指标
+    # 7. NIL 监控指标
     nil_true = author_true_papers.get("new_author", set())
     nil_pred = author_pred_papers.get("new_author", set())
     nil_recall = len(nil_true & nil_pred) / len(nil_true) if len(nil_true) > 0 else 0
     
-    old_author_papers_count = len(all_task_papers - nil_true)
-    nil_false_positives = len(nil_pred - nil_true) # 误报：老作者被你预测成了新作者
+    # 修正变量名：使用 all_pids
+    old_author_papers_count = len(all_pids - nil_true)
+    nil_false_positives = len(nil_pred - nil_true)
     fpr = nil_false_positives / old_author_papers_count if old_author_papers_count > 0 else 0
 
     print("="*85)
@@ -101,8 +110,8 @@ def run_evaluation(pred_path, gt_path, is_test_mode=True):
     print("="*85)
 
 if __name__ == "__main__":
+    # 路径根据你的实际环境调整
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    PRED_FILE = os.path.join(BASE_DIR, "output", "result.json")
-    GT_FILE = os.path.join(BASE_DIR, "dataset", "valid", "cna_valid_ground_truth.json")
-    
+    PRED_FILE = os.path.join(BASE_DIR, "output", "sa_lzk", "result.json")
+    GT_FILE = os.path.join(BASE_DIR, "dataset", "sa_lzk_data", "cna_valid_ground_truth.json")
     run_evaluation(PRED_FILE, GT_FILE, is_test_mode=True)

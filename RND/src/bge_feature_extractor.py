@@ -11,7 +11,8 @@ from typing import Dict, List
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from safetensors.torch import load_file
-VECTOR_CACHE_DIR = "output/vector_cache"
+from .util import build_feature_text, get_vector_cache_path
+VECTOR_CACHE_DIR = get_vector_cache_path()
 os.environ['HF_HUB_OFFLINE'] = '1'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['SENTENCE_TRANSFORMERS_OFFLINE'] = '1' 
@@ -132,11 +133,11 @@ def same_name(a: str, b: str) -> bool:
     
 @torch.no_grad()
 def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: Dict):
-    MODEL.max_seq_length = 256
+    MODEL.max_seq_length = 256 #512
     MODEL.half()
     profiles_text = {}
 
-    target_text = f"{target_paper.get('title', '')} {' '.join(target_paper.get('keywords', []))}".strip()
+    target_text = build_feature_text(target_paper)
     target_embedding = MODEL.encode(
         [target_text],
         batch_size=1,
@@ -145,7 +146,7 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
     ).half()[0]
    
     for auth_id in candidate_ids:
-        cache_path = os.path.join(VECTOR_CACHE_DIR, f"{auth_id}.safetensors")
+        cache_path = os.path.join(get_vector_cache_path(), f"{auth_id}.safetensors")
         basic_info = author_db.get(auth_id, {})
         pub_ids = basic_info.get('pubs', [])
 
@@ -158,17 +159,17 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
             pub_texts_all = []
             for pid in pub_ids:
                 p = whole_pub_db.get(pid, {})
-                pub_texts_all.append(f"{p.get('title','')} {' '.join(p.get('keywords',[]))}".strip())
+                pub_texts_all.append(build_feature_text(p))
             if not pub_texts_all: continue
             cand_embeddings = MODEL.encode(pub_texts_all, batch_size=16, convert_to_tensor=True,normalize_embeddings=True).half()
 
         scores = cand_embeddings @ target_embedding
         # 取 top-k 论文来动态构建机构和合作者信息，k 的值可以根据实际情况调整
-        top_k_val = min(5, cand_embeddings.size(0))
+        top_k_val = min(6, cand_embeddings.size(0))
         topk = torch.topk(scores, k=top_k_val)
         top_indices = topk.indices.tolist()
 
-        # THRESHOLD = 0.67 # 阈值
+        # THRESHOLD = 0.65 # 阈值
         # MIN_KEEP = 3       # 搜索质量差时的保底数
         # MAX_KEEP = 10      # 搜索结果爆炸时的封顶数
         # mask = scores >= THRESHOLD
@@ -195,7 +196,7 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
             if not pub_detail: continue
             
             # 拼接论文文本用于关键词提取和 works 展示
-            p_text = f"{pub_detail.get('title','')} {' '.join(pub_detail.get('keywords',[]))}".strip()
+            p_text = build_feature_text(pub_detail)
             top_works_texts.append(p_text)
 
             # 提取机构和合作者
@@ -209,7 +210,8 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
                     if entry_name: dynamic_collabs[entry_name] += 1
 
 
-        unique_orgs = list(dict.fromkeys(dynamic_orgs)) 
+        # unique_orgs = list(dict.fromkeys(dynamic_orgs)) 
+        unique_orgs = merge_similar_orgs(dynamic_orgs)
         top_collabs = dynamic_collabs.most_common(5)
 
         desc = f"【 ID: {auth_id} 】\n"

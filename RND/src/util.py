@@ -4,7 +4,7 @@ import os
 # --- 1. 实验全局配置 ---
 # 可选模式: "title", "title_keywords", "title_venue", "title_abstract"
 # 每次跑不同的特征对比实验时，只需修改这一行
-CURRENT_FEATURE_MODE = "title_keywords" 
+CURRENT_FEATURE_MODE = "title_keywords_venue"  # 你可以切换成 "title" 或其他模式来测试不同的特征组合
 
 # --- 2. 路径管理 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,12 +22,23 @@ MODE_DIR_MAP = {
 }
 
 def get_vector_cache_path():
-    """根据当前特征模式，自动返回对应的子目录路径"""
-    sub_dir = MODE_DIR_MAP.get(CURRENT_FEATURE_MODE, "T_K")
-    target_path = os.path.join(VECTOR_CACHE_ROOT, sub_dir)
-    # 自动创建不存在的子目录
+    """
+    隔离逻辑：
+    旧数据 (CURRENT_DATASET未设置): output/vector_cache/T_K
+    新数据 (sa_lzk): output/vector_cache/sa_lzk/T_K
+    """
+    dataset_name = os.getenv("CURRENT_DATASET")
+    sub_mode_dir = MODE_DIR_MAP.get(CURRENT_FEATURE_MODE, "T_K")
+    
+    if dataset_name:
+
+        target_path = os.path.join(VECTOR_CACHE_ROOT, dataset_name, sub_mode_dir)
+    else:
+        # 保持你截图里的原有习惯，直接接模式文件夹
+        target_path = os.path.join(VECTOR_CACHE_ROOT, sub_mode_dir)
+        
     if not os.path.exists(target_path):
-        os.makedirs(target_path)
+        os.makedirs(target_path, exist_ok=True)
     return target_path
 
 # --- 3. 核心逻辑：特征提取函数 ---

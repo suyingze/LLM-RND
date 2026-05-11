@@ -190,7 +190,7 @@ def build_author_profiles(candidate_ids, author_db, whole_pub_db, target_paper: 
         ).half()
         #取相似得分TOPn
         scores = cand_embeddings @ target_embedding
-        topk = torch.topk(scores, k=min(5, pub_count))
+        topk = torch.topk(scores, k=min(7, pub_count))
 
         unique_orgs = list(set(all_orgs_normalized))
         top_collabs = global_collaborators.most_common(5)
